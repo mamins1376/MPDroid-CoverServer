@@ -3,6 +3,7 @@
 from flask import Flask,make_response,abort
 from mutagen.easyid3 import EasyID3
 from mutagen import File
+from threading import Timer
 import sqlite3 as sqlite
 import os, sys
 app = Flask(__name__)
@@ -11,14 +12,6 @@ app = Flask(__name__)
 def error():
   print('USAGE: server.py <MUSIC>\n  <MUSIC> must be the absolute path of you musics folder.\n')
   exit()
-  
-if len(sys.argv) != 2:
-  error()
-
-MUSIC_DIR = str(sys.argv[-1])
-if not os.path.exists(MUSIC_DIR):
-  print('{} doesn\'t exist.\n'.format(MUSIC_DIR))
-  error()
 
 ### CONFIGURATIONS ###
 # Database file used for indexing songs
@@ -54,7 +47,27 @@ class Database:
         ''')
     self.conn.commit()
 
-  def insert(self,song):
+  def _songs_table_exist(self):
+    query = 'SELECT COUNT(*) FROM sqlite_master WHERE type="table" AND name="Songs";'
+    self.cur.execute(query)
+    self.conn.commit()
+    result = self.cur.fetchone()[0]
+    return bool(result)
+
+  def count_records(self):
+    if not self._songs_table_exist():
+      return 0
+
+    query = 'SELECT COUNT(*) FROM Songs'
+    self.cur.execute(query)
+    self.conn.commit()
+    count = self.cur.fetchone()[0]
+    return int(count)
+
+  def __len__(self):
+    return self.count_records()
+
+  def _insert_song(self,song):
     query = 'INSERT INTO Songs VALUES(?, ?, ?, ?)'
     self.cur.execute(query,
         (
@@ -64,6 +77,14 @@ class Database:
           song.path,
           ),
         )
+
+  def insert(self,song):
+    self._insert_song(song)
+    self.conn.commit()
+
+  def batch_insert(self, songs):
+    for song in songs:
+      self._insert_song(song)
     self.conn.commit()
 
   def get_song(self, artist, album, title='any'):
@@ -80,6 +101,9 @@ class Database:
 
   def close(self):
     self.conn.close()
+
+  def __del__(self):
+    self.close()
 
 class Song:
 
@@ -125,14 +149,27 @@ def song_from_path(path):
       title=title,
       path=path)
 
-def update_database(db):
-  db.create_table()
+def list_songs():
+  songs = []
   for root, dirs, files in os.walk(MUSIC_DIR):
     for file in files:
       if file.endswith(".mp3"):
         path = os.path.join(root, file)
         song = song_from_path(path)
-        db.insert(song)
+        songs.append(song)
+  return songs
+
+
+def update_database(db):
+  Timer(10 * 60, update_database, [db]).start()
+
+  songs = list_songs()
+  if len(db) == len(songs):
+    # no need to update
+    return
+
+  db.create_table()
+  db.batch_insert(songs)
 
 def init_database():
   if not os.path.isfile(DB_FILE):
@@ -175,7 +212,6 @@ def is_title(title):
   return not title in ['cover','folder','%placeholder_filename']
 
 
-
 @app.route("/<Artist>/<Album>/Covers/front.jpg")
 def album_cover(Artist, Album):
   return generate_response(Artist, Album)
@@ -191,11 +227,24 @@ def song_cover_jpg(Artist, Album, Title):
   else:
     return generate_response(Artist, Album)
 
+def main():
+  global MUSIC_DIR
 
-init_database()
+  if len(sys.argv) != 2:
+    error()
 
-try:
-  app.run(host=HOST,port=PORT)
-except PermissionError:
-  print('ERROR: can\'t open port {}: you have not enough premissions.'.format(PORT))
-  exit()
+  MUSIC_DIR = str(sys.argv[-1])
+  if not os.path.exists(MUSIC_DIR):
+    print('{} doesn\'t exist.\n'.format(MUSIC_DIR))
+    error()
+  
+  init_database()
+
+  try:
+    app.run(host=HOST,port=PORT)
+  except PermissionError:
+    print('ERROR: can\'t open port {}: you have not enough premissions.'.format(PORT))
+    exit()
+
+if __name__ == '__main__':
+  main()

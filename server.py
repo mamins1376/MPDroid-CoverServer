@@ -10,7 +10,13 @@ app = Flask(__name__)
 
 # Set musics directory
 def error():
-  print('USAGE: server.py <MUSIC>\n  <MUSIC> must be the absolute path of you musics folder.\n')
+  print(
+  """
+USAGE: server.py [-p <PORT>] <MUSIC>
+
+  <PORT> is port number, default 80
+  <MUSIC> must be the absolute path of you musics folder
+  """)
   exit()
 
 ### CONFIGURATIONS ###
@@ -28,7 +34,7 @@ HOST = '0.0.0.0'
 PORT = 80
 
 # app debug. disable it for releases.
-app.debug = True
+app.debug = False
 
 
 class Database:
@@ -228,15 +234,23 @@ def song_cover_jpg(Artist, Album, Title):
     return generate_response(Artist, Album)
 
 def main():
-  global MUSIC_DIR
+  global MUSIC_DIR, PORT
 
-  if len(sys.argv) != 2:
+  if len(sys.argv) < 2:
     error()
 
   MUSIC_DIR = str(sys.argv[-1])
   if not os.path.exists(MUSIC_DIR):
     print('{} doesn\'t exist.\n'.format(MUSIC_DIR))
     error()
+
+  if '-p' in sys.argv:
+    try:
+      idx = sys.argv.index('-p')
+      arg = sys.argv[idx+1]
+      PORT = int(arg)
+    except Exception:
+        error()
   
   init_database()
 
